@@ -1,3 +1,5 @@
+# Copied from MIT Licensed project. https://github.com/Tobalation/Godot-orbit-camera
+
 extends Node3D
 
 # Simple orbit camera rig control script
