@@ -409,38 +409,25 @@ void main() {
     for (int component = 0; component < 4; component++) {
         if (segmentsPerComponent[component] < 3) continue;
         
-        // Initialize QEF
-        QEFData qef;
-        qef_initialize(qef);
-        vec3 massPoint = vec3(0.0);
+        // Solve QEF for component center
+        vec3 center = vec3(0.0);
+        vec3 centerNormal = vec3(0.0);
+        int validCrossings = 0;
         
-        // Accumulate QEF data
+        // Collect crossings for this component
         for (int i = 0; i < segmentsPerComponent[component]; i++) {
             Segment seg = segmentsByComponent[component][i];
             ivec4 faceEdges = faceToCubeEdgeTable[seg.face];
             int edgeIndex = faceEdges[seg.startFaceEdge];
             
             Crossing crossing = edgeCrossings[edgeIndex];
-            qef_add(qef, crossing.position, crossing.normal);
-            massPoint += crossing.position;
+            center += crossing.position;
+            centerNormal += crossing.normal;
+            validCrossings++;
         }
         
-        // Calculate mass point (average)
-        massPoint /= float(segmentsPerComponent[component]);
-        
-        // Solve QEF
-        const float QEF_ERROR = 1e-6;
-        const int QEF_SWEEPS = 4;
-        vec3 center = qef_solve(qef, massPoint, QEF_ERROR, QEF_SWEEPS);
-        
-        // Calculate center normal
-        vec3 centerNormal = vec3(0.0);
-        for (int i = 0; i < segmentsPerComponent[component]; i++) {
-            Segment seg = segmentsByComponent[component][i];
-            ivec4 faceEdges = faceToCubeEdgeTable[seg.face];
-            int edgeIndex = faceEdges[seg.startFaceEdge];
-            centerNormal += edgeCrossings[edgeIndex].normal;
-        }
+        // Simple average (replace with proper QEF solver)
+        center /= float(validCrossings);
         centerNormal = normalize(centerNormal);
         
         // Get base vertex index
