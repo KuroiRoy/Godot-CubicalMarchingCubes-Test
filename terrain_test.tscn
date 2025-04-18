@@ -1,0 +1,14 @@
+[gd_scene load_steps=3 format=3 uid="uid://mj87awh1qdcj"]
+
+[ext_resource type="Script" uid="uid://pa2eft5ook5n" path="res://terrain_manager.gd" id="1_wxr32"]
+[ext_resource type="PackedScene" path="res://CameraRig.tscn" id="2_2ub8u"]
+
+[node name="Node3D" type="Node3D"]
+script = ExtResource("1_wxr32")
+
+[node name="CameraRig" parent="." node_paths=PackedStringArray("_camTarget") instance=ExtResource("2_2ub8u")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 34.2044, 20.6017)
+_camTarget = NodePath("..")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.887534, 0.460742, 0, -0.460742, 0.887534, 0, 0, 1.96465)
