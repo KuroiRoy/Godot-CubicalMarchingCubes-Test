@@ -12,15 +12,8 @@
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 8) in;
 
-// Input Hermite data
-struct HermiteData {
-    vec3 position;
-    vec3 normal;
-    float density;
-};
-
-layout(set = 0, binding = 0, std430) readonly buffer HermiteBuffer {
-    HermiteData hermiteData[];
+layout(set = 0, binding = 0, std430) readonly buffer DensityBuffer {
+    float densityData[];
 };
 
 // Output mesh data
@@ -225,31 +218,32 @@ void main() {
     }
 
     // Get Hermite data for this cell
-    HermiteData cornerData[8];
+    float cornerData[8];
     for (int i = 0; i < 8; i++) {
         ivec3 corner = cellPos + ivec3((i & 1), ((i >> 1) & 1), ((i >> 2) & 1));
         int index = corner.x + corner.y * CHUNK_SIZE + corner.z * CHUNK_SIZE * CHUNK_SIZE;
-        cornerData[i] = hermiteData[index];
+        cornerData[i] = densityData[index];
     }
 
     // Find edge crossings
     Crossing edgeCrossings[12];
     for (int edge = 0; edge < 12; edge++) {
         ivec2 corners = cubeEdgeCornerTable[edge];
-        HermiteData data1 = cornerData[corners.x];
-        HermiteData data2 = cornerData[corners.y];
+        float data1 = cornerData[corners.x];
+        float data2 = cornerData[corners.y];
         
-        if (data1.density * data2.density > 0.0) continue;
+        if (data1 * data2 > 0.0) continue;
+        ivec3 corner1 = cellPos + ivec3((corners.x & 1), ((corners.x >> 1) & 1), ((corners.x >> 2) & 1));
+        ivec3 corner2 = cellPos + ivec3((corners.y & 1), ((corners.y >> 1) & 1), ((corners.y >> 2) & 1));
         
         vec3 position = approximateZeroCrossingPosition(
-            data1.position, 
-            data2.position, 
-            data1.density, 
-            data2.density
+            corner1, 
+            corner2, 
+            data1, 
+            data2
         );
         
-        vec3 normal = normalize(data1.normal * abs(data1.density) + data2.normal * abs(data2.density));
-        edgeCrossings[edge] = Crossing(position, normal);
+        edgeCrossings[edge] = Crossing(position, vec3(0, 1, 0));
     }
 
     // Face processing
@@ -264,10 +258,10 @@ void main() {
         ivec4 faceCorners = faceToCubeCornerTable[face];
         int index = 0;
         
-        if (cornerData[faceCorners.x].density <= 0.0) index |= 1;
-        if (cornerData[faceCorners.y].density <= 0.0) index |= 2;
-        if (cornerData[faceCorners.z].density <= 0.0) index |= 4;
-        if (cornerData[faceCorners.w].density <= 0.0) index |= 8;
+        if (cornerData[faceCorners.x] <= 0.0) index |= 1;
+        if (cornerData[faceCorners.y] <= 0.0) index |= 2;
+        if (cornerData[faceCorners.z] <= 0.0) index |= 4;
+        if (cornerData[faceCorners.w] <= 0.0) index |= 8;
         
         Case currentCase = marchingSquaresTable[index];
         

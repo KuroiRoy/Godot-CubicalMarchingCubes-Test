@@ -11,7 +11,7 @@ var shader_rid: RID
 var pipeline: RID
 
 # Buffers
-var hermite_buffer: RID
+var density_buffer: RID
 var vertex_buffer: RID
 var normal_buffer: RID
 var index_buffer: RID
@@ -40,10 +40,9 @@ func _ready():
 
 func setup_buffers():
 	# Density field buffer (float32)
-	var hermite_bytes = PackedByteArray()
-	# hermite_bytes.resize(CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE * 7 * 4)  # 7 floats * 4 bytes per each
-	hermite_bytes.resize(CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE * 3 * 12) # 12 bytes per element (std430 uses largest member, in this case vec3)
-	hermite_buffer = rd.storage_buffer_create(hermite_bytes.size(), hermite_bytes)
+	var density_bytes = PackedByteArray()
+	density_bytes.resize(CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE * 4)
+	density_buffer = rd.storage_buffer_create(density_bytes.size(), density_bytes)
 	
 	# Vertex buffer (vec4 = 4 floats)
 	var vertex_bytes = PackedByteArray()
@@ -66,67 +65,21 @@ func setup_buffers():
 	count_buffer = rd.storage_buffer_create(count_bytes.size(), count_bytes)
 
 func generate_test_density():
-	# Create arrays for all components of HermiteData
-	var positions = PackedFloat32Array()
-	var normals = PackedFloat32Array()
 	var densities = PackedFloat32Array()
-	
-	# Each array will contain CHUNK_SIZE^3 elements (but positions and normals have 3 components each)
-	positions.resize(CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE * 3)
-	normals.resize(CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE * 3)
 	densities.resize(CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE)
-	
-	var center = Vector3(CHUNK_SIZE / 2.0, CHUNK_SIZE / 2.0, CHUNK_SIZE / 2.0)
 	
 	for z in CHUNK_SIZE:
 		for y in CHUNK_SIZE:
 			for x in CHUNK_SIZE:
-				var pos = Vector3(x, y, z)
 				var idx = x + y * CHUNK_SIZE + z * CHUNK_SIZE * CHUNK_SIZE
-				var vec_idx = idx * 3
-				
-				# Position (3 floats)
-				positions[vec_idx] = pos.x
-				positions[vec_idx + 1] = pos.y
-				positions[vec_idx + 2] = pos.z
-				
-				# Density (1 float)
-				var dist = pos.distance_to(center)
-				densities[idx] = dist - (CHUNK_SIZE / 3.0)
-				
-				# Normal (3 floats) - gradient of the density field
-				var normal = (pos - center).normalized()
-				normals[vec_idx] = normal.x
-				normals[vec_idx + 1] = normal.y
-				normals[vec_idx + 2] = normal.z
+				# Simple sphere density function
+				var center = Vector3(CHUNK_SIZE / 2.0, CHUNK_SIZE / 2.0, CHUNK_SIZE / 2.0)
+				var pos = Vector3(x, y, z)
+				densities[idx] = pos.distance_to(center) - (CHUNK_SIZE / 3.0)
 	
-	# Combine all data into a single byte array matching the HermiteData struct
-	var byte_data = PackedByteArray()
-	# byte_data.resize(CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE * 7 * 4)  # 7 floats per element
-	byte_data.resize(CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE * 3 * 12) # 12 bytes per element (std430 uses largest member, in this case vec3)
-	
-	# Manually pack the data in the correct order (position, normal, density)
-	for i in range(CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE):
-		var base_offset = i * 3 * 12 # 12 bytes per element
-		
-		# Position (3 floats)
-		for j in range(3):
-			var bytes = positions.to_byte_array().slice((i * 3 + j) * 4, (i * 3 + j + 1) * 4)
-			for k in range(4):
-				byte_data[base_offset + j * 4 + k] = bytes[k]
-		
-		# Normal (3 floats)
-		for j in range(3):
-			var bytes = normals.to_byte_array().slice((i * 3 + j) * 4, (i * 3 + j + 1) * 4)
-			for k in range(4):
-				byte_data[base_offset + 12 + j * 4 + k] = bytes[k]  # 12 = 3 floats * 4 bytes
-		
-		# Density (1 float)
-		var density_bytes = densities.to_byte_array().slice(i * 4, (i + 1) * 4)
-		for j in range(4):
-			byte_data[base_offset + 24 + j] = density_bytes[j]  # 24 = 6 floats * 4 bytes
-	
-	rd.buffer_update(hermite_buffer, 0, byte_data.size(), byte_data)
+	# Convert to PackedByteArray before uploading
+	var byte_data = densities.to_byte_array()
+	rd.buffer_update(density_buffer, 0, byte_data.size(), byte_data)
 
 func extract_surface():
 	# Create uniforms for all bindings
@@ -136,7 +89,7 @@ func extract_surface():
 	var uniform0 = RDUniform.new()
 	uniform0.uniform_type = RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER
 	uniform0.binding = 0
-	uniform0.add_id(hermite_buffer)
+	uniform0.add_id(density_buffer)
 	uniforms.append(uniform0)
 	
 	# Binding 1: Vertex buffer
@@ -251,7 +204,7 @@ func _exit_tree():
 	if rd:
 		rd.free_rid(shader_rid)
 		rd.free_rid(pipeline)
-		rd.free_rid(hermite_buffer)
+		rd.free_rid(density_buffer)
 		rd.free_rid(vertex_buffer)
 		rd.free_rid(normal_buffer)
 		rd.free_rid(index_buffer)
