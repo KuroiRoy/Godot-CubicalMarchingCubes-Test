@@ -21,15 +21,11 @@ layout(set = 0, binding = 1, std430) buffer VertexBuffer {
     vec4 vertices[];
 };
 
-layout(set = 0, binding = 2, std430) buffer NormalBuffer {
-    vec4 normals[];
-};
-
-layout(set = 0, binding = 3, std430) buffer IndexBuffer {
+layout(set = 0, binding = 2, std430) buffer IndexBuffer {
     uint indices[];
 };
 
-layout(set = 0, binding = 4, std430) buffer CountBuffer {
+layout(set = 0, binding = 3, std430) buffer CountBuffer {
     uint vertex_count;
     uint index_count;
 };
@@ -363,7 +359,6 @@ void main() {
         
         // Store center vertex
         vertices[baseVertex] = vec4(center, 1.0);
-        normals[baseVertex] = vec4(centerNormal, 0.0);
         
         // Store perimeter vertices
         for (int i = 0; i < segmentsPerComponent[component]; i++) {
@@ -373,7 +368,6 @@ void main() {
             
             Crossing crossing = edgeCrossings[edgeIndex];
             vertices[baseVertex + 1 + i] = vec4(crossing.position, 1.0);
-            normals[baseVertex + 1 + i] = vec4(crossing.normal, 0.0);
             
             // Create triangle indices
             if (i > 0) {

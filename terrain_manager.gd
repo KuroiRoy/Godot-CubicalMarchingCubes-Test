@@ -13,7 +13,6 @@ var pipeline: RID
 # Buffers
 var density_buffer: RID
 var vertex_buffer: RID
-var normal_buffer: RID
 var index_buffer: RID
 var count_buffer: RID
 
@@ -49,11 +48,6 @@ func setup_buffers():
 	vertex_bytes.resize(MAX_VERTICES * 16)  # 16 bytes per vec4 (4 floats × 4 bytes)
 	vertex_buffer = rd.storage_buffer_create(vertex_bytes.size(), vertex_bytes)
 	
-	# Normal buffer (vec4 = 4 floats)
-	var normal_bytes = PackedByteArray()
-	normal_bytes.resize(MAX_VERTICES * 16)  # Same as vertex buffer
-	normal_buffer = rd.storage_buffer_create(normal_bytes.size(), normal_bytes)
-	
 	# Index buffer (uint32)
 	var index_bytes = PackedByteArray()
 	index_bytes.resize(MAX_VERTICES * 15 * 4)  # 4 bytes per uint32
@@ -64,6 +58,15 @@ func setup_buffers():
 	count_bytes.resize(8)  # 8 bytes for 2 uint32s
 	count_buffer = rd.storage_buffer_create(count_bytes.size(), count_bytes)
 
+func density_function(pos: Vector3):
+	var center = Vector3(CHUNK_SIZE / 2.0, CHUNK_SIZE / 2.0, CHUNK_SIZE / 2.0)
+	return pos.distance_to(center) - (CHUNK_SIZE / 3.0)
+
+func density_normal(pos: Vector3):
+	var center = Vector3(CHUNK_SIZE / 2.0, CHUNK_SIZE / 2.0, CHUNK_SIZE / 2.0)
+	return (pos - center).normalized()
+
+
 func generate_test_density():
 	var densities = PackedFloat32Array()
 	densities.resize(CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE)
@@ -73,9 +76,8 @@ func generate_test_density():
 			for x in CHUNK_SIZE:
 				var idx = x + y * CHUNK_SIZE + z * CHUNK_SIZE * CHUNK_SIZE
 				# Simple sphere density function
-				var center = Vector3(CHUNK_SIZE / 2.0, CHUNK_SIZE / 2.0, CHUNK_SIZE / 2.0)
 				var pos = Vector3(x, y, z)
-				densities[idx] = pos.distance_to(center) - (CHUNK_SIZE / 3.0)
+				densities[idx] = density_function(pos)
 	
 	# Convert to PackedByteArray before uploading
 	var byte_data = densities.to_byte_array()
@@ -98,27 +100,20 @@ func extract_surface():
 	uniform1.binding = 1
 	uniform1.add_id(vertex_buffer)
 	uniforms.append(uniform1)
-	
-	# Binding 2: Normal buffer
+		
+	# Binding 2: Index buffer
 	var uniform2 = RDUniform.new()
 	uniform2.uniform_type = RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER
 	uniform2.binding = 2
-	uniform2.add_id(normal_buffer)
+	uniform2.add_id(index_buffer)
 	uniforms.append(uniform2)
 	
-	# Binding 3: Index buffer
+	# Binding 3: Count buffer
 	var uniform3 = RDUniform.new()
 	uniform3.uniform_type = RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER
 	uniform3.binding = 3
-	uniform3.add_id(index_buffer)
+	uniform3.add_id(count_buffer)
 	uniforms.append(uniform3)
-	
-	# Binding 4: Count buffer
-	var uniform4 = RDUniform.new()
-	uniform4.uniform_type = RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER
-	uniform4.binding = 4
-	uniform4.add_id(count_buffer)
-	uniforms.append(uniform4)
 	
 	# Create uniform set with all uniforms
 	var uniform_set = rd.uniform_set_create(uniforms, shader_rid, 0)
@@ -153,7 +148,6 @@ func create_mesh():
 	
 	# Read back mesh data
 	var vertices_bytes = rd.buffer_get_data(vertex_buffer, 0, vertex_count * 16)
-	var normals_bytes = rd.buffer_get_data(normal_buffer, 0, vertex_count * 16)
 	var indices_bytes = rd.buffer_get_data(index_buffer, 0, index_count * 4)
 	
 	# Create Godot mesh
@@ -163,7 +157,6 @@ func create_mesh():
 		
 	# Convert bytes to float arrays
 	var vertices_floats = vertices_bytes.to_float32_array()
-	var normals_floats = normals_bytes.to_float32_array()
 	
 	# Convert to Vector3 arrays
 	var vertex_array = PackedVector3Array()
@@ -171,16 +164,13 @@ func create_mesh():
 	
 	for i in vertex_count:
 		var base = i * 4  # 4 floats per vertex (vec4)
-		vertex_array.append(Vector3(
+		var vertex = Vector3(
 			vertices_floats[base + 0],
 			vertices_floats[base + 1],
 			vertices_floats[base + 2]
-		))
-		normal_array.append(Vector3(
-			normals_floats[base + 0],
-			normals_floats[base + 1],
-			normals_floats[base + 2]
-		))
+		)
+		vertex_array.append(vertex)
+		normal_array.append(density_normal(vertex))
 	
 	# Convert indices
 	var index_array = indices_bytes.to_int32_array()
@@ -206,6 +196,5 @@ func _exit_tree():
 		rd.free_rid(pipeline)
 		rd.free_rid(density_buffer)
 		rd.free_rid(vertex_buffer)
-		rd.free_rid(normal_buffer)
 		rd.free_rid(index_buffer)
 		rd.free_rid(count_buffer)
