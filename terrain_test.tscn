@@ -1,8 +1,11 @@
-[gd_scene load_steps=4 format=3 uid="uid://mj87awh1qdcj"]
+[gd_scene load_steps=5 format=3 uid="uid://mj87awh1qdcj"]
 
 [ext_resource type="Script" uid="uid://pa2eft5ook5n" path="res://terrain_manager.gd" id="1_wxr32"]
 [ext_resource type="PackedScene" path="res://CameraRig.tscn" id="2_2ub8u"]
 [ext_resource type="PackedScene" uid="uid://rja0lb1gr1yx" path="res://Triangle thingy.glb" id="3_qa721"]
+
+[sub_resource type="BoxMesh" id="BoxMesh_qa721"]
+size = Vector3(32, 32, 32)
 
 [node name="Node3D" type="Node3D"]
 script = ExtResource("1_wxr32")
@@ -16,3 +19,8 @@ transform = Transform3D(1, 0, 0, 0, 0.887534, 0.460742, 0, -0.460742, 0.887534, 
 
 [node name="Triangle thingy" parent="." instance=ExtResource("3_qa721")]
 transform = Transform3D(-4.37114e-08, 0, 1, 0, 1, 0, -1, 0, -4.37114e-08, 0, 0, 0)
+
+[node name="CSGMesh3D" type="CSGMesh3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 16, 16, 16)
+visible = false
+mesh = SubResource("BoxMesh_qa721")

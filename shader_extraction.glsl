@@ -10,7 +10,7 @@
 #define MAX_SEGMENTS_PER_CELL 12
 #define MAX_SEGMENTS_PER_FACE 2
 
-layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 8) in;
 
 // Input Hermite data
 struct HermiteData {
@@ -94,42 +94,13 @@ const ivec4 faceToCubeCornerTable[6] = ivec4[](
     ivec4(0, 1, 2, 3)     // Back
 );
 
-const ivec4 nextFaceTable[24] = ivec4[](
-    // Left face transitions
-    ivec4(4, 1, 2, 3),  // edge 0 -> (Forward, edge1), (Up, edge0), (Down, edge0)
-    ivec4(5, 0, 2, 3),  // edge 1 -> (Back, edge0), (Up, edge1), (Down, edge1)
-    ivec4(0, 2, 4, 5),  // edge 2 -> (Left, edge2), (Forward, edge2), (Back, edge2)
-    ivec4(1, 3, 5, 4),  // edge 3 -> (Right, edge3), (Back, edge3), (Forward, edge3)
-    
-    // Right face transitions
-    ivec4(5, 1, 2, 3),  // edge 0 -> (Back, edge1), (Up, edge0), (Down, edge0)
-    ivec4(4, 0, 2, 3),  // edge 1 -> (Forward, edge0), (Up, edge1), (Down, edge1)
-    ivec4(1, 2, 5, 4),  // edge 2 -> (Right, edge2), (Back, edge2), (Forward, edge2)
-    ivec4(0, 3, 4, 5),  // edge 3 -> (Left, edge3), (Forward, edge3), (Back, edge3)
-    
-    // Up face transitions
-    ivec4(0, 2, 4, 5),  // edge 0 -> (Left, edge2), (Forward, edge2), (Back, edge2)
-    ivec4(1, 2, 5, 4),  // edge 1 -> (Right, edge2), (Back, edge2), (Forward, edge2)
-    ivec4(2, 0, 4, 5),  // edge 2 -> (Up, edge0), (Forward, edge0), (Back, edge0)
-    ivec4(3, 1, 5, 4),  // edge 3 -> (Down, edge1), (Back, edge1), (Forward, edge1)
-    
-    // Down face transitions
-    ivec4(0, 3, 5, 4),  // edge 0 -> (Left, edge3), (Back, edge3), (Forward, edge3)
-    ivec4(1, 3, 4, 5),  // edge 1 -> (Right, edge3), (Forward, edge3), (Back, edge3)
-    ivec4(3, 0, 5, 4),  // edge 2 -> (Down, edge0), (Back, edge0), (Forward, edge0)
-    ivec4(2, 1, 4, 5),  // edge 3 -> (Up, edge1), (Forward, edge1), (Back, edge1)
-    
-    // Forward face transitions
-    ivec4(1, 1, 2, 3),  // edge 0 -> (Right, edge1), (Up, edge2), (Down, edge3)
-    ivec4(0, 0, 2, 3),  // edge 1 -> (Left, edge0), (Up, edge2), (Down, edge3)
-    ivec4(2, 2, 0, 1),  // edge 2 -> (Forward, edge2), (Left, edge0), (Right, edge1)
-    ivec4(3, 3, 1, 0),  // edge 3 -> (Back, edge3), (Right, edge1), (Left, edge0)
-    
-    // Back face transitions
-    ivec4(0, 1, 2, 3),  // edge 0 -> (Left, edge1), (Up, edge3), (Down, edge2)
-    ivec4(1, 0, 2, 3),  // edge 1 -> (Right, edge0), (Up, edge3), (Down, edge2)
-    ivec4(2, 3, 1, 0),  // edge 2 -> (Back, edge3), (Right, edge0), (Left, edge1)
-    ivec4(3, 2, 0, 1)   // edge 3 -> (Forward, edge2), (Left, edge1), (Right, edge0)
+const ivec2 nextFaceTable[24] = ivec2[](
+    ivec2(4, 1), ivec2(5, 0), ivec2(2, 0), ivec2(3, 0), // Left    -> Forward, Back,    Up,      Down
+    ivec2(5, 1), ivec2(4, 0), ivec2(2, 1), ivec2(3, 1), // Right   -> Back,    Forward, Up,      Down
+    ivec2(0, 2), ivec2(1, 2), ivec2(4, 2), ivec2(5, 2), // Up      -> Left,    Right,   Forward, Back
+    ivec2(0, 3), ivec2(1, 3), ivec2(5, 3), ivec2(4, 3), // Down    -> Left,    Right,   Back,    Forward
+    ivec2(1, 1), ivec2(0, 0), ivec2(2, 2), ivec2(3, 3), // Forward -> Right,   Left,    Up,      Down
+    ivec2(0, 1), ivec2(1, 0), ivec2(2, 3), ivec2(3, 2)  // Back    -> Left,    Right,   Up,      Down 
 );
 
 struct Crossing {
@@ -247,11 +218,6 @@ bool closestPointsOnTwoLines(out vec3 closestPointLine1, vec3 linePoint1, vec3 l
     return false;
 }
 
-vec3 calculateNormal(vec3 position) {
-    // Implement your normal calculation from Hermite data
-    return normalize(vec3(0.0, 1.0, 0.0));
-}
-
 void main() {
     ivec3 cellPos = ivec3(gl_GlobalInvocationID.xyz);
     if (cellPos.x >= CHUNK_SIZE-1 || cellPos.y >= CHUNK_SIZE-1 || cellPos.z >= CHUNK_SIZE-1) {
@@ -265,16 +231,6 @@ void main() {
         int index = corner.x + corner.y * CHUNK_SIZE + corner.z * CHUNK_SIZE * CHUNK_SIZE;
         cornerData[i] = hermiteData[index];
     }
-
-    // Check for sign change
-    bool hasSignChange = false;
-    for (int i = 0; i < 8; i++) {
-        if (cornerData[i].density * cornerData[0].density <= 0.0) {
-            hasSignChange = true;
-            break;
-        }
-    }
-    if (!hasSignChange) return;
 
     // Find edge crossings
     Crossing edgeCrossings[12];
@@ -292,20 +248,17 @@ void main() {
             data2.density
         );
         
-        vec3 normal = calculateNormal(position);
+        vec3 normal = normalize(data1.normal * abs(data1.density) + data2.normal * abs(data2.density));
         edgeCrossings[edge] = Crossing(position, normal);
     }
 
-    // Process each face
-    Segment segmentsByFace[6][2];
-    int segmentsPerComponent[4] = int[](0, 0, 0, 0);
-    Segment segmentsByComponent[4][12];
-    
     // Face processing
+    Segment segmentsByFace[6][2];
+
     for (int face = 0; face < 6; face++) {
         // Reset segments for this face
-        segmentsByFace[face][0] = Segment(face, -1, -1, 0, false);
-        segmentsByFace[face][1] = Segment(face, -1, -1, 1, false);
+        segmentsByFace[face][0] = Segment(-1, -1, -1, 0, false);
+        segmentsByFace[face][1] = Segment(-1, -1, -1, 1, false);
         
         // Get marching squares case for this face
         ivec4 faceCorners = faceToCubeCornerTable[face];
@@ -320,89 +273,69 @@ void main() {
         
         // Create segments for this face
         if (currentCase.len > 0) {
-            segmentsByFace[face][0] = Segment(
-                face, 
-                currentCase.edgeA,
-                currentCase.edgeB,
-                0,
-                false
-            );
+            segmentsByFace[face][0] = Segment(face, currentCase.edgeA, currentCase.edgeB, 0, false);
         }
         
         if (currentCase.len > 2) {
-            segmentsByFace[face][1] = Segment(
-                face,
-                currentCase.edge2A,
-                currentCase.edge2B,
-                1,
-                false
-            );
+            segmentsByFace[face][1] = Segment(face, currentCase.edge2A, currentCase.edge2B, 1, false);
         }
     }
 
     // Link segments into components
+    Segment segmentsByComponent[4][12];
+    int segmentsPerComponent[4] = int[](0, 0, 0, 0);
+
     for (int component = 0; component < 4; component++) {
         // Find first available segment
         Segment firstSegment = Segment(-1, -1, -1, -1, true);
         for (int face = 0; face < 6; face++) {
-            for (int i = 0; i < 2; i++) {
-                if (!segmentsByFace[face][i].isUsed && 
-                    segmentsByFace[face][i].startFaceEdge != -1) {
-                    firstSegment = segmentsByFace[face][i];
-                    break;
-                }
+            if (segmentsByFace[face][0].face != -1 && !segmentsByFace[face][0].isUsed) {
+                firstSegment = segmentsByFace[face][0];
+                break;
             }
-            if (firstSegment.face != -1) break;
+
+            if (segmentsByFace[face][1].face != -1 && !segmentsByFace[face][1].isUsed) {
+                firstSegment = segmentsByFace[face][1];
+                break;
+            }
         }
         
-        if (firstSegment.face == -1) break; // No more components
-        
-        // Follow linked segments
-        Segment currentSegment = firstSegment;
+        if (firstSegment.face == -1 || firstSegment.isUsed) break; // No more segments to use for components
+
+        // Find segments that link to the current segment
+        Segment nextSegment = firstSegment;
+        int componentSegmentIndex = 0;
         do {
-            // Add to component
-            segmentsByComponent[component][segmentsPerComponent[component]] = currentSegment;
-            segmentsPerComponent[component]++;
+            // Store the segment in the component and increment the index
+            segmentsByComponent[component][componentSegmentIndex] = nextSegment;
+            componentSegmentIndex++;
+
+            // Mark the current segment as invalid for other components
+            segmentsByFace[nextSegment.face][nextSegment.storageIndex].isUsed = true;
+
+            int nextFace = nextFaceTable[nextSegment.face * 4 + nextSegment.endFaceEdge].x;
+            int nextFaceEdge = nextFaceTable[nextSegment.face * 4 + nextSegment.endFaceEdge].y;
             
-            // Mark as used
-            segmentsByFace[currentSegment.face][currentSegment.storageIndex].isUsed = true;
-            
-            // Get next segment
-            ivec4 faceEdges = faceToCubeEdgeTable[currentSegment.face];
-            int nextFaceEdge = currentSegment.endFaceEdge;
-            
-            // Find next face and edge using lookup tables
-            int nextFace = -1;
-            int nextEdge = -1;
-            ivec4 transitions = nextFaceTable[currentSegment.face * 4 + currentSegment.endFaceEdge];
-            for (int t = 0; t < 4; t += 2) {
-                nextFace = transitions[t];
-                nextEdge = transitions[t+1];
-                
-                // Check if this face has a matching segment
-                for (int i = 0; i < 2; i++) {
-                    if (!segmentsByFace[nextFace][i].isUsed && 
-                        segmentsByFace[nextFace][i].startFaceEdge == nextEdge) {
-                        currentSegment = segmentsByFace[nextFace][i];
-                        break;
-                    }
-                }
-                if (currentSegment.face != -1) break;
+            Segment candidate = segmentsByFace[nextFace][0];
+            if (candidate.face != -1 && !candidate.isUsed && candidate.startFaceEdge == nextFaceEdge) {
+                nextSegment = candidate;
+                continue;
             }
-            
-            // Find matching segment
-            currentSegment = Segment(-1, -1, -1, -1, true);
-            for (int i = 0; i < 2; i++) {
-                if (!segmentsByFace[nextFace][i].isUsed && 
-                    segmentsByFace[nextFace][i].startFaceEdge == nextEdge) {
-                    currentSegment = segmentsByFace[nextFace][i];
-                    break;
-                }
+            candidate = segmentsByFace[nextFace][1];
+            if (candidate.face != -1 && !candidate.isUsed && candidate.startFaceEdge == nextFaceEdge) {
+                nextSegment = candidate;
+                continue;
             }
-            
-        } while (currentSegment.face != -1 && !currentSegment.isUsed && 
-                !(currentSegment.face == firstSegment.face && 
-                  currentSegment.storageIndex == firstSegment.storageIndex));
+            break; // Components should be valid every time, no valid segment was found
+        }
+        while (!(
+            nextSegment.face == firstSegment.face &&
+            nextSegment.startFaceEdge == firstSegment.startFaceEdge &&
+            nextSegment.endFaceEdge == firstSegment.endFaceEdge
+        ));
+
+        // Store the amount of segments in the current component
+        segmentsPerComponent[component] = componentSegmentIndex;
     }
 
     // Generate triangle fans for each component
@@ -431,7 +364,7 @@ void main() {
         centerNormal = normalize(centerNormal);
         
         // Get base vertex index
-        uint baseVertex = atomicAdd(vertex_count, uint(segmentsPerComponent[component] + 2));
+        uint baseVertex = atomicAdd(vertex_count, uint(segmentsPerComponent[component] + 1));
         uint baseIndex = atomicAdd(index_count, uint(segmentsPerComponent[component] * 3));
         
         // Store center vertex

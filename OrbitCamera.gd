@@ -7,7 +7,7 @@ extends Node3D
 # control variables
 @export var maxPitchDeg : float = 45
 @export var minPitchDeg : float = -45
-@export var maxZoom : float = 20
+@export var maxZoom : float = 150
 @export var minZoom : float = 4
 @export var zoomStep : float = 2
 @export var zoomYStep : float = 0.15
@@ -19,7 +19,7 @@ extends Node3D
 
 # private variables
 @onready var _springArm : SpringArm3D = get_node("SpringArm")
-@onready var _curZoom : float = maxZoom
+@onready var _curZoom : float = (maxZoom + minZoom) / 2.0
 
 var _curYoffset : float = camYOffset
 
