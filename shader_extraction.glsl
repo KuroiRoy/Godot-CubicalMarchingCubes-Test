@@ -13,7 +13,7 @@
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 8) in;
 
 layout(set = 0, binding = 0, std430) readonly buffer DensityBuffer {
-    float densityData[];
+    vec4 densityData[];
 };
 
 // Output mesh data
@@ -144,12 +144,17 @@ void qef_add(out QEFData qef, vec3 p, vec3 n) {
     qef.numPoints++;
 }
 
-// Simplified SVD solver for 3x3 symmetric matrices
 vec3 qef_solve(QEFData qef, vec3 massPoint, float svdTolerance, int sweeps) {
     if (qef.numPoints == 0) return massPoint;
     
     mat3 A = qef.AtA;
     vec3 b = qef.Atb;
+    
+    // Add small regularization to avoid singularity
+    const float REGULARIZATION = 1e-6;
+    A[0][0] += REGULARIZATION;
+    A[1][1] += REGULARIZATION;
+    A[2][2] += REGULARIZATION;
     
     // Initial guess is the mass point
     vec3 x = massPoint;
@@ -164,8 +169,7 @@ vec3 qef_solve(QEFData qef, vec3 massPoint, float svdTolerance, int sweeps) {
             break;
         }
         
-        // Update solution: x += r / diag(AtA)
-        // (Jacobi preconditioner - simple but effective)
+        // Update solution using Jacobi iteration
         x += vec3(
             r.x / max(A[0][0], 0.001),
             r.y / max(A[1][1], 0.001),
@@ -173,12 +177,10 @@ vec3 qef_solve(QEFData qef, vec3 massPoint, float svdTolerance, int sweeps) {
         );
     }
     
-    // Optional: Project onto the cell if solution is outside
+    // Clamp to cell bounds
     vec3 cellMin = vec3(gl_GlobalInvocationID.xyz);
     vec3 cellMax = cellMin + vec3(1.0);
-    x = clamp(x, cellMin, cellMax);
-    
-    return x;
+    return clamp(x, cellMin, cellMax);
 }
 
 // Helper functions
@@ -214,7 +216,7 @@ void main() {
     }
 
     // Get Hermite data for this cell
-    float cornerData[8];
+    vec4 cornerData[8];
     for (int i = 0; i < 8; i++) {
         ivec3 corner = cellPos + ivec3((i & 1), ((i >> 1) & 1), ((i >> 2) & 1));
         int index = corner.x + corner.y * CHUNK_SIZE + corner.z * CHUNK_SIZE * CHUNK_SIZE;
@@ -225,21 +227,18 @@ void main() {
     Crossing edgeCrossings[12];
     for (int edge = 0; edge < 12; edge++) {
         ivec2 corners = cubeEdgeCornerTable[edge];
-        float data1 = cornerData[corners.x];
-        float data2 = cornerData[corners.y];
-        
-        if (data1 * data2 > 0.0) continue;
+        vec4 data1 = cornerData[corners.x];
+        vec4 data2 = cornerData[corners.y];
+        if (data1.x * data2.x > 0.0) continue;
+
         ivec3 corner1 = cellPos + ivec3((corners.x & 1), ((corners.x >> 1) & 1), ((corners.x >> 2) & 1));
         ivec3 corner2 = cellPos + ivec3((corners.y & 1), ((corners.y >> 1) & 1), ((corners.y >> 2) & 1));
         
-        vec3 position = approximateZeroCrossingPosition(
-            corner1, 
-            corner2, 
-            data1, 
-            data2
-        );
+        vec3 position = approximateZeroCrossingPosition(corner1, corner2, data1.x, data2.x);
+        // vec3 normal = normalize(data1.yzw * abs(data1.x) + data2.yzw * abs(data2.x));
+        vec3 normal = normalize(mix(data1.yzw, data2.yzw, abs(data1.x) / (abs(data1.x) + abs(data2.x))));
         
-        edgeCrossings[edge] = Crossing(position, vec3(0, 1, 0));
+        edgeCrossings[edge] = Crossing(position, normal);
     }
 
     // Face processing
@@ -254,10 +253,10 @@ void main() {
         ivec4 faceCorners = faceToCubeCornerTable[face];
         int index = 0;
         
-        if (cornerData[faceCorners.x] <= 0.0) index |= 1;
-        if (cornerData[faceCorners.y] <= 0.0) index |= 2;
-        if (cornerData[faceCorners.z] <= 0.0) index |= 4;
-        if (cornerData[faceCorners.w] <= 0.0) index |= 8;
+        if (cornerData[faceCorners.x].x <= 0.0) index |= 1;
+        if (cornerData[faceCorners.y].x <= 0.0) index |= 2;
+        if (cornerData[faceCorners.z].x <= 0.0) index |= 4;
+        if (cornerData[faceCorners.w].x <= 0.0) index |= 8;
         
         Case currentCase = marchingSquaresTable[index];
         
@@ -332,27 +331,75 @@ void main() {
     for (int component = 0; component < 4; component++) {
         if (segmentsPerComponent[component] < 3) continue;
         
-        // Solve QEF for component center
-        vec3 center = vec3(0.0);
-        vec3 centerNormal = vec3(0.0);
-        int validCrossings = 0;
+        // Initialize QEF
+        QEFData qef;
+        qef_initialize(qef);
+        vec3 massPoint = vec3(0.0);
         
-        // Collect crossings for this component
+        // Accumulate QEF data
         for (int i = 0; i < segmentsPerComponent[component]; i++) {
             Segment seg = segmentsByComponent[component][i];
             ivec4 faceEdges = faceToCubeEdgeTable[seg.face];
             int edgeIndex = faceEdges[seg.startFaceEdge];
             
             Crossing crossing = edgeCrossings[edgeIndex];
-            center += crossing.position;
-            centerNormal += crossing.normal;
-            validCrossings++;
+            qef_add(qef, crossing.position, crossing.normal);
+            massPoint += crossing.position;
         }
         
-        // Simple average (replace with proper QEF solver)
-        center /= float(validCrossings);
-        centerNormal = normalize(centerNormal);
+        // Calculate mass point (average)
+        massPoint /= float(segmentsPerComponent[component]);
         
+        // Solve QEF
+        const float QEF_ERROR = 1e-6;
+        const int QEF_SWEEPS = 4;
+
+        vec3 center = qef_solve(qef, massPoint, QEF_ERROR, QEF_SWEEPS);
+        // float error = length(qef.AtA * center - qef.Atb);
+        // if (error > 0.1) {  // If solution is poor
+        //     center = massPoint;
+        // }
+
+
+        // vec3 averageNormal = vec3(0.0);
+        // vec3 weightedCenter = vec3(0.0);
+        // float totalWeight = 0.0;
+
+        // for (int i = 0; i < segmentsPerComponent[component]; i++) {
+        //     Segment seg = segmentsByComponent[component][i];
+        //     ivec4 faceEdges = faceToCubeEdgeTable[seg.face];
+        //     int edgeIndex = faceEdges[seg.startFaceEdge];
+        //     Crossing crossing = edgeCrossings[edgeIndex];
+
+        //     averageNormal += crossing.normal;
+        // }
+
+        // averageNormal = normalize(averageNormal);
+
+        // for (int i = 0; i < segmentsPerComponent[component]; i++) {
+        //     Segment seg = segmentsByComponent[component][i];
+        //     ivec4 faceEdges = faceToCubeEdgeTable[seg.face];
+        //     int edgeIndex = faceEdges[seg.startFaceEdge];
+        //     Crossing crossing = edgeCrossings[edgeIndex];
+
+        //     float weight = max(0.01, dot(crossing.normal, averageNormal)); // avoid zero weight
+        //     weightedCenter += crossing.position * weight;
+        //     totalWeight += weight;
+        // }
+
+        // vec3 center = weightedCenter / totalWeight;
+
+
+        // vec3 center = vec3(0.0);
+        // for (int i = 0; i < segmentsPerComponent[component]; i++) {
+        //     Segment seg = segmentsByComponent[component][i];
+        //     ivec4 faceEdges = faceToCubeEdgeTable[seg.face];
+        //     int edgeIndex = faceEdges[seg.startFaceEdge];
+        //     center += edgeCrossings[edgeIndex].position;
+        // }
+        // center /= float(segmentsPerComponent[component]);
+
+                
         // Get base vertex index
         uint baseVertex = atomicAdd(vertex_count, uint(segmentsPerComponent[component] + 1));
         uint baseIndex = atomicAdd(index_count, uint(segmentsPerComponent[component] * 3));
@@ -371,15 +418,15 @@ void main() {
             
             // Create triangle indices
             if (i > 0) {
-                indices[baseIndex + (i-1)*3] = baseVertex;
-                indices[baseIndex + (i-1)*3 + 1] = baseVertex + i;
-                indices[baseIndex + (i-1)*3 + 2] = baseVertex + i + 1;
+                indices[baseIndex + (i - 1) * 3] = baseVertex;
+                indices[baseIndex + (i - 1) * 3 + 1] = baseVertex + i;
+                indices[baseIndex + (i - 1) * 3 + 2] = baseVertex + i + 1;
             }
         }
         
         // Close the fan
-        indices[baseIndex + (segmentsPerComponent[component]-1)*3] = baseVertex;
-        indices[baseIndex + (segmentsPerComponent[component]-1)*3 + 1] = baseVertex + segmentsPerComponent[component];
-        indices[baseIndex + (segmentsPerComponent[component]-1)*3 + 2] = baseVertex + 1;
+        indices[baseIndex + (segmentsPerComponent[component] - 1) * 3] = baseVertex;
+        indices[baseIndex + (segmentsPerComponent[component] - 1) * 3 + 1] = baseVertex + segmentsPerComponent[component];
+        indices[baseIndex + (segmentsPerComponent[component] - 1) * 3 + 2] = baseVertex + 1;
     }
 }

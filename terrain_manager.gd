@@ -40,17 +40,17 @@ func _ready():
 func setup_buffers():
 	# Density field buffer (float32)
 	var density_bytes = PackedByteArray()
-	density_bytes.resize(CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE * 4)
+	density_bytes.resize(CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE * 16) # 16 bytes per vec4 (4 floats × 4 bytes)
 	density_buffer = rd.storage_buffer_create(density_bytes.size(), density_bytes)
 	
 	# Vertex buffer (vec4 = 4 floats)
 	var vertex_bytes = PackedByteArray()
-	vertex_bytes.resize(MAX_VERTICES * 16)  # 16 bytes per vec4 (4 floats × 4 bytes)
+	vertex_bytes.resize(MAX_VERTICES * 16) # 16 bytes per vec4 (4 floats × 4 bytes)
 	vertex_buffer = rd.storage_buffer_create(vertex_bytes.size(), vertex_bytes)
 	
 	# Index buffer (uint32)
 	var index_bytes = PackedByteArray()
-	index_bytes.resize(MAX_VERTICES * 15 * 4)  # 4 bytes per uint32
+	index_bytes.resize(MAX_VERTICES * 15 * 4) # 4 bytes per uint32
 	index_buffer = rd.storage_buffer_create(index_bytes.size(), index_bytes)
 	
 	# Count buffer (2× uint32)
@@ -60,21 +60,20 @@ func setup_buffers():
 
 func density_function(pos: Vector3) -> float:
 	var c = CHUNK_SIZE / 2.0
-	var s = 0.60 # scale (using s because Node3D already has a scale field)
-	var freq = 2.0
-	
-	# Gyroid-like wave pattern
-	var gx = sin(pos.x * s) * cos(pos.y * s)
-	var gy = sin(pos.y * s) * cos(pos.z * s)
-	var gz = sin(pos.z * s) * cos(pos.x * s)
-	
-	var wave = gx + gy + gz  # ranges roughly [-3, 3]
+	var center = Vector3(c, c - 0.4 * CHUNK_SIZE, c)
+	var local_pos = pos - center
 
-	# Add a sphere falloff to limit shape
-	var center = Vector3(c, c, c)
-	var radial_falloff = pos.distance_to(center) - (CHUNK_SIZE * 0.3)
+	# Parameters for pyramid shape
+	var h = CHUNK_SIZE * 0.6   # height of the pyramid
+	var b = CHUNK_SIZE * 0.45   # base width of the pyramid
 
-	return wave * freq + radial_falloff
+	# SDF for square-based pyramid
+	var q = Vector3(abs(local_pos.x), local_pos.y, abs(local_pos.z))
+	var m1 = q.x + q.z
+	var m2 = h - q.y
+	var sdf = max((m1 * (h / b)) - m2, -local_pos.y)
+
+	return sdf
 
 func density_normal(pos: Vector3) -> Vector3:
 	var eps = 0.5
@@ -84,7 +83,7 @@ func density_normal(pos: Vector3) -> Vector3:
 	return Vector3(dx, dy, dz).normalized()
 
 func generate_test_density():
-	var densities = PackedFloat32Array()
+	var densities = PackedVector4Array()
 	densities.resize(CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE)
 	
 	for z in CHUNK_SIZE:
@@ -93,7 +92,8 @@ func generate_test_density():
 				var idx = x + y * CHUNK_SIZE + z * CHUNK_SIZE * CHUNK_SIZE
 				# Simple sphere density function
 				var pos = Vector3(x, y, z)
-				densities[idx] = density_function(pos)
+				var normal = density_normal(pos);
+				densities[idx] = Vector4(density_function(pos), normal.x, normal.y, normal.z)
 	
 	# Convert to PackedByteArray before uploading
 	var byte_data = densities.to_byte_array()
