@@ -58,14 +58,30 @@ func setup_buffers():
 	count_bytes.resize(8)  # 8 bytes for 2 uint32s
 	count_buffer = rd.storage_buffer_create(count_bytes.size(), count_bytes)
 
-func density_function(pos: Vector3):
-	var center = Vector3(CHUNK_SIZE / 2.0, CHUNK_SIZE / 2.0, CHUNK_SIZE / 2.0)
-	return pos.distance_to(center) - (CHUNK_SIZE / 3.0)
+func density_function(pos: Vector3) -> float:
+	var c = CHUNK_SIZE / 2.0
+	var s = 0.60 # scale (using s because Node3D already has a scale field)
+	var freq = 2.0
+	
+	# Gyroid-like wave pattern
+	var gx = sin(pos.x * s) * cos(pos.y * s)
+	var gy = sin(pos.y * s) * cos(pos.z * s)
+	var gz = sin(pos.z * s) * cos(pos.x * s)
+	
+	var wave = gx + gy + gz  # ranges roughly [-3, 3]
 
-func density_normal(pos: Vector3):
-	var center = Vector3(CHUNK_SIZE / 2.0, CHUNK_SIZE / 2.0, CHUNK_SIZE / 2.0)
-	return (pos - center).normalized()
+	# Add a sphere falloff to limit shape
+	var center = Vector3(c, c, c)
+	var radial_falloff = pos.distance_to(center) - (CHUNK_SIZE * 0.3)
 
+	return wave * freq + radial_falloff
+
+func density_normal(pos: Vector3) -> Vector3:
+	var eps = 0.5
+	var dx = density_function(pos + Vector3(eps, 0, 0)) - density_function(pos - Vector3(eps, 0, 0))
+	var dy = density_function(pos + Vector3(0, eps, 0)) - density_function(pos - Vector3(0, eps, 0))
+	var dz = density_function(pos + Vector3(0, 0, eps)) - density_function(pos - Vector3(0, 0, eps))
+	return Vector3(dx, dy, dz).normalized()
 
 func generate_test_density():
 	var densities = PackedFloat32Array()
