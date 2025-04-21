@@ -106,10 +106,11 @@ struct Segment {
 };
 
 struct QEFData {
-    mat3 AtA;       // A^T * A matrix
+    mat3 AtA;       // A^T * A matrix (3x3)
     vec3 Atb;       // A^T * b vector
     float btb;      // b^T * b scalar
     int numPoints;  // Number of points accumulated
+    vec4 massPoint; // Homogeneous mass point (xyz = position, w = count)
 };
 
 void qef_initialize(out QEFData qef) {
@@ -117,6 +118,7 @@ void qef_initialize(out QEFData qef) {
     qef.Atb = vec3(0.0);
     qef.btb = 0.0;
     qef.numPoints = 0;
+    qef.massPoint = vec4(0.0);
 }
 
 void qef_add(out QEFData qef, vec3 p, vec3 n) {
@@ -141,10 +143,41 @@ void qef_add(out QEFData qef, vec3 p, vec3 n) {
     // Accumulate btb = b * b
     qef.btb += b * b;
     
+    // Accumulate mass point
+    qef.massPoint.xyz += p;
+    qef.massPoint.w += 1.0;
     qef.numPoints++;
 }
 
-vec3 qef_solve(QEFData qef, vec3 massPoint, float svdTolerance, int sweeps) {
+vec3 qef_solve_direct(QEFData qef, vec3 massPoint) {
+    if (qef.numPoints < 3) return massPoint;
+    
+    mat3 A = qef.AtA;
+    vec3 b = qef.Atb;
+    
+    // Add small regularization to avoid singularity
+    const float REGULARIZATION = 1e-6;
+    A[0][0] += REGULARIZATION;
+    A[1][1] += REGULARIZATION;
+    A[2][2] += REGULARIZATION;
+    
+    // Calculate determinant (we need to check that it's invertible)
+    float det = determinant(A);
+    if (abs(det) < 1e-12) {
+        return massPoint; // Fallback to mass point if matrix is singular
+    }
+    
+    // Use the inverse of A to solve for x (the best fitting point)
+    mat3 A_inv = inverse(A);
+    vec3 x = A_inv * b;
+    
+    // Clamp to cell bounds
+    vec3 cellMin = vec3(gl_GlobalInvocationID.xyz);
+    vec3 cellMax = cellMin + vec3(1.0);
+    return clamp(x, cellMin, cellMax);
+}
+
+vec3 qef_solve_iterative(QEFData qef, vec3 massPoint, float svdTolerance, int sweeps) {
     if (qef.numPoints == 0) return massPoint;
     
     mat3 A = qef.AtA;
@@ -181,6 +214,68 @@ vec3 qef_solve(QEFData qef, vec3 massPoint, float svdTolerance, int sweeps) {
     vec3 cellMin = vec3(gl_GlobalInvocationID.xyz);
     vec3 cellMax = cellMin + vec3(1.0);
     return clamp(x, cellMin, cellMax);
+}
+
+// Simplified SVD solver for 3x3 symmetric matrices
+vec3 qef_solve_svd(QEFData qef, float svdTolerance) {
+    if (qef.numPoints < 3) {
+        return qef.massPoint.xyz / max(qef.massPoint.w, 1.0);
+    }
+    
+    // Compute mass point (average of positions)
+    vec3 massPoint = qef.massPoint.xyz / qef.massPoint.w;
+    
+    // Regularize the matrix to avoid singularity
+    const float REGULARIZATION = 1e-6;
+    mat3 A = qef.AtA;
+    A[0][0] += REGULARIZATION;
+    A[1][1] += REGULARIZATION;
+    A[2][2] += REGULARIZATION;
+    
+    // Compute eigenvalues (simplified approach)
+    vec3 eigenvalues;
+    {
+        // Simple power iteration to estimate dominant eigenvalue
+        vec3 v = vec3(1.0, 1.0, 1.0);
+        for (int i = 0; i < 4; i++) {
+            v = normalize(A * v);
+        }
+        eigenvalues.x = dot(v, A * v);
+        
+        // Deflate matrix for next eigenvalue
+        mat3 B = A - eigenvalues.x * outerProduct(v, v);
+        v = vec3(1.0, -1.0, 1.0);
+        for (int i = 0; i < 4; i++) {
+            v = normalize(B * v);
+        }
+        eigenvalues.y = dot(v, B * v);
+        
+        // Last eigenvalue from trace
+        eigenvalues.z = A[0][0] + A[1][1] + A[2][2] - eigenvalues.x - eigenvalues.y;
+    }
+    
+    // Pseudo-inverse threshold
+    const float PINV_THRESHOLD = svdTolerance * max(max(eigenvalues.x, eigenvalues.y), eigenvalues.z);
+    
+    // Compute V*inv(S)*V^T (pseudo-inverse)
+    mat3 invA = mat3(0.0);
+    if (eigenvalues.x > PINV_THRESHOLD) {
+        vec3 v1 = normalize(A * vec3(1,0,0)); // Simplified eigenvector
+        invA += (1.0 / eigenvalues.x) * outerProduct(v1, v1);
+    }
+    if (eigenvalues.y > PINV_THRESHOLD) {
+        vec3 v2 = normalize(A * vec3(0,1,0));
+        invA += (1.0 / eigenvalues.y) * outerProduct(v2, v2);
+    }
+    if (eigenvalues.z > PINV_THRESHOLD) {
+        vec3 v3 = normalize(A * vec3(0,0,1));
+        invA += (1.0 / eigenvalues.z) * outerProduct(v3, v3);
+    }
+    
+    // Solve x = inv(A) * (Atb - AtA*massPoint) + massPoint
+    vec3 x = invA * (qef.Atb - A * massPoint) + massPoint;
+    
+    return x;
 }
 
 // Helper functions
@@ -331,10 +426,43 @@ void main() {
     for (int component = 0; component < 4; component++) {
         if (segmentsPerComponent[component] < 3) continue;
         
+        // // Initialize QEF
+        // QEFData qef;
+        // qef_initialize(qef);
+        // vec3 massPoint = vec3(0.0);
+        
+        // // Accumulate QEF data
+        // for (int i = 0; i < segmentsPerComponent[component]; i++) {
+        //     Segment seg = segmentsByComponent[component][i];
+        //     ivec4 faceEdges = faceToCubeEdgeTable[seg.face];
+        //     int edgeIndex = faceEdges[seg.startFaceEdge];
+            
+        //     Crossing crossing = edgeCrossings[edgeIndex];
+        //     qef_add(qef, crossing.position, crossing.normal);
+        //     massPoint += crossing.position;
+        // }
+        
+        // // Calculate mass point (average)
+        // massPoint /= float(segmentsPerComponent[component]);
+        
+        // // Solve QEF using direct matrix inversion (more accurate but more expensive)
+        // const float QEF_ERROR = 1e-6;
+        // vec3 center = qef_solve_direct(qef, massPoint);
+        
+        // // Alternative: Use iterative solver (faster but less accurate)
+        // // const int QEF_SWEEPS = 4;
+        // // vec3 center = qef_solve_iterative(qef, massPoint, QEF_ERROR, QEF_SWEEPS);
+        
+        // // Fallback to mass point if solution is poor
+        // float error = length(qef.AtA * center - qef.Atb);
+        // if (error > 0.1) {
+        //     center = massPoint;
+        // }
+
+
         // Initialize QEF
         QEFData qef;
         qef_initialize(qef);
-        vec3 massPoint = vec3(0.0);
         
         // Accumulate QEF data
         for (int i = 0; i < segmentsPerComponent[component]; i++) {
@@ -344,21 +472,16 @@ void main() {
             
             Crossing crossing = edgeCrossings[edgeIndex];
             qef_add(qef, crossing.position, crossing.normal);
-            massPoint += crossing.position;
         }
-        
-        // Calculate mass point (average)
-        massPoint /= float(segmentsPerComponent[component]);
         
         // Solve QEF
         const float QEF_ERROR = 1e-6;
-        const int QEF_SWEEPS = 4;
-
-        vec3 center = qef_solve(qef, massPoint, QEF_ERROR, QEF_SWEEPS);
-        // float error = length(qef.AtA * center - qef.Atb);
-        // if (error > 0.1) {  // If solution is poor
-        //     center = massPoint;
-        // }
+        vec3 center = qef_solve_svd(qef, QEF_ERROR);
+        
+        // Clamp to cell bounds
+        vec3 cellMin = vec3(gl_GlobalInvocationID.xyz);
+        vec3 cellMax = cellMin + vec3(1.0);
+        center = clamp(center, cellMin, cellMax);
 
 
         // vec3 averageNormal = vec3(0.0);
