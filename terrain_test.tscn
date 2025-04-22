@@ -12,6 +12,8 @@ script = ExtResource("1_wxr32")
 
 [node name="CameraRig" parent="." node_paths=PackedStringArray("_camTarget") instance=ExtResource("2_2ub8u")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 34.2044, 20.6017)
+maxPitchDeg = 89.0
+minPitchDeg = -89.0
 maxZoom = 50.0
 _camTarget = NodePath("..")
 
