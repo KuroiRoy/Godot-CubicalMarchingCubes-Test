@@ -60,7 +60,7 @@ func setup_buffers():
 
 func density_function(pos: Vector3) -> float:
 	var c = CHUNK_SIZE / 2.0
-	var center = Vector3(c, c - 0.4 * CHUNK_SIZE, c)
+	var center = Vector3(c, c - 0.2 * CHUNK_SIZE, c)
 	var local_pos = pos - center
 
 	# Parameters for pyramid shape
@@ -204,6 +204,8 @@ func create_mesh():
 	var mesh_instance = MeshInstance3D.new()
 	mesh_instance.mesh = arr_mesh
 	add_child(mesh_instance)
+
+	mesh_instance.global_position = Vector3.ONE * CHUNK_SIZE / -2.0
 
 func _exit_tree():
 	# Clean up RIDs

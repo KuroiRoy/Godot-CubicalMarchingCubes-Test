@@ -460,28 +460,28 @@ void main() {
         // }
 
 
-        // Initialize QEF
-        QEFData qef;
-        qef_initialize(qef);
+        // // Initialize QEF
+        // QEFData qef;
+        // qef_initialize(qef);
         
-        // Accumulate QEF data
-        for (int i = 0; i < segmentsPerComponent[component]; i++) {
-            Segment seg = segmentsByComponent[component][i];
-            ivec4 faceEdges = faceToCubeEdgeTable[seg.face];
-            int edgeIndex = faceEdges[seg.startFaceEdge];
+        // // Accumulate QEF data
+        // for (int i = 0; i < segmentsPerComponent[component]; i++) {
+        //     Segment seg = segmentsByComponent[component][i];
+        //     ivec4 faceEdges = faceToCubeEdgeTable[seg.face];
+        //     int edgeIndex = faceEdges[seg.startFaceEdge];
             
-            Crossing crossing = edgeCrossings[edgeIndex];
-            qef_add(qef, crossing.position, crossing.normal);
-        }
+        //     Crossing crossing = edgeCrossings[edgeIndex];
+        //     qef_add(qef, crossing.position, crossing.normal);
+        // }
         
-        // Solve QEF
-        const float QEF_ERROR = 1e-6;
-        vec3 center = qef_solve_svd(qef, QEF_ERROR);
+        // // Solve QEF
+        // const float QEF_ERROR = 1e-6;
+        // vec3 center = qef_solve_svd(qef, QEF_ERROR);
         
-        // Clamp to cell bounds
-        vec3 cellMin = vec3(gl_GlobalInvocationID.xyz);
-        vec3 cellMax = cellMin + vec3(1.0);
-        center = clamp(center, cellMin, cellMax);
+        // // Clamp to cell bounds
+        // vec3 cellMin = vec3(gl_GlobalInvocationID.xyz);
+        // vec3 cellMax = cellMin + vec3(1.0);
+        // center = clamp(center, cellMin, cellMax);
 
 
         // vec3 averageNormal = vec3(0.0);
@@ -513,14 +513,38 @@ void main() {
         // vec3 center = weightedCenter / totalWeight;
 
 
-        // vec3 center = vec3(0.0);
-        // for (int i = 0; i < segmentsPerComponent[component]; i++) {
-        //     Segment seg = segmentsByComponent[component][i];
-        //     ivec4 faceEdges = faceToCubeEdgeTable[seg.face];
-        //     int edgeIndex = faceEdges[seg.startFaceEdge];
-        //     center += edgeCrossings[edgeIndex].position;
-        // }
-        // center /= float(segmentsPerComponent[component]);
+        vec3 center = vec3(0.0);
+        for (int i = 0; i < segmentsPerComponent[component]; i++) {
+            Segment segment = segmentsByComponent[component][i];
+            ivec4 faceEdges = faceToCubeEdgeTable[segment.face];
+            int edgeIndex = faceEdges[segment.startFaceEdge];
+            center += edgeCrossings[edgeIndex].position;
+        }
+        center /= float(segmentsPerComponent[component]);
+
+
+        uint iterations = 5;
+        float stepSize = 0.1;
+        for (int k = 0; k < iterations; k++) {
+            vec3 gradient = vec3(0.0);
+            
+            // Compute gradient (sum of plane corrections)
+            for (int i = 0; i < segmentsPerComponent[component]; i++) {
+                Segment segment = segmentsByComponent[component][i];
+                ivec4 faceEdges = faceToCubeEdgeTable[segment.face];
+                int edgeIndex = faceEdges[segment.startFaceEdge];
+                Crossing crossing = edgeCrossings[edgeIndex];
+                
+                // Signed distance from center to the plane (position, normal)
+                float distance = dot(crossing.normal, center - crossing.position);
+                
+                // Correction vector: push center along the normal to minimize distance
+                gradient += crossing.normal * distance;
+            }
+            
+            // Nudge center in the opposite direction of the gradient
+            center -= stepSize * gradient;
+        }
 
                 
         // Get base vertex index
