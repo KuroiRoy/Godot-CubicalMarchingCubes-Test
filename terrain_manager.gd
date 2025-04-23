@@ -45,7 +45,7 @@ func _ready():
 
 func _process(delta):
 	# Rotate density field
-	densityRotation = densityRotation * Quaternion.from_euler(Vector3(0, delta * 2.0, 0))
+	densityRotation = densityRotation * Quaternion.from_euler(Vector3(0, delta * 0.5, 0))
 	
 	# Update density field
 	generate_densities()
@@ -167,7 +167,9 @@ func generate_densities():
 	dirty = true
 
 func update_mesh():
-	rd.buffer_update(count_buffer, 0, 8, [0, 0])
+	var reset_counts = PackedInt32Array()
+	reset_counts.resize(2)
+	rd.buffer_update(count_buffer, 0, 8, reset_counts.to_byte_array())
 
 	# Dispatch compute shader using pre-created uniform set
 	var compute_list = rd.compute_list_begin()
