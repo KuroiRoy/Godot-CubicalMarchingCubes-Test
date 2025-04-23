@@ -16,6 +16,11 @@ var vertex_buffer: RID
 var index_buffer: RID
 var count_buffer: RID
 
+# Mesh tracking
+var mesh_instance: MeshInstance3D
+var dirty = true  # Start dirty to generate initial mesh
+var densityRotation = Quaternion.from_euler(Vector3(0, 0, 0))
+
 func _ready():
 	# Initialize rendering device
 	rd = RenderingServer.create_local_rendering_device()
@@ -30,11 +35,25 @@ func _ready():
 	
 	# Generate test density field
 	generate_test_density()
+
+func _process(_delta):
+	densityRotation += Quaternion.from_euler(Vector3(0, 1, 0))
+	generate_test_density()
+	
+	if dirty:
+		update_mesh()
+		dirty = false
+
+func update_mesh():
+	# Clear existing mesh if it exists
+	if mesh_instance:
+		remove_child(mesh_instance)
+		mesh_instance.queue_free()
 	
 	# Run compute shader
 	extract_surface()
 	
-	# Create mesh from results
+	# Create new mesh from results
 	create_mesh()
 
 func setup_buffers():
@@ -98,6 +117,9 @@ func generate_test_density():
 	# Convert to PackedByteArray before uploading
 	var byte_data = densities.to_byte_array()
 	rd.buffer_update(density_buffer, 0, byte_data.size(), byte_data)
+	
+	# Mark as dirty to trigger mesh update
+	dirty = true
 
 func extract_surface():
 	# Create uniforms for all bindings
@@ -201,7 +223,7 @@ func create_mesh():
 	arr_mesh.surface_set_material(0, material)
 	
 	# Create mesh instance
-	var mesh_instance = MeshInstance3D.new()
+	mesh_instance = MeshInstance3D.new()
 	mesh_instance.mesh = arr_mesh
 	add_child(mesh_instance)
 
