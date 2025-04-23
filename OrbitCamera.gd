@@ -28,7 +28,7 @@ func _ready() -> void:
 	set_as_top_level(true)
 
 func _input(event) -> void:
-	if event is InputEventMouseMotion:
+	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		# rotate the rig around the target
 		rotation.y -= event.relative.x * horizontalSensitivity
 		rotation.y = wrapf(rotation.y,0.0,TAU)
@@ -42,10 +42,10 @@ func _input(event) -> void:
 		if event.is_pressed():
 			if event.button_index == MOUSE_BUTTON_LEFT:
 				Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-			if event.button_index == MOUSE_BUTTON_WHEEL_UP and _curZoom > minZoom:
+			if event.button_index == MOUSE_BUTTON_WHEEL_UP and _curZoom > minZoom and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 				_curZoom -= zoomStep
 				camYOffset -= zoomYStep
-			if event.button_index == MOUSE_BUTTON_WHEEL_DOWN and _curZoom < maxZoom:
+			if event.button_index == MOUSE_BUTTON_WHEEL_DOWN and _curZoom < maxZoom and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 				_curZoom += zoomStep
 				camYOffset += zoomYStep
 	
